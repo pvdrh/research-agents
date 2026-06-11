@@ -84,7 +84,7 @@ cd /đường/dẫn/đến/research
 claude
 ```
 
-(Hoặc dùng IDE extension VS Code, mở folder `research/`.)
+(Hoặc dùng IDE extension VS Code, mở folder.)
 
 ### Bước 3 — Verify
 Trong Claude Code, gõ:
