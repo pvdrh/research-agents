@@ -1,0 +1,22 @@
+# Python virtual environment (auto-created by input-reader skill)
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Output reports (regenerated each run)
+results/*.html
+results/*.md
+!results/.gitkeep
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Temp / lock files from Office
+~$*
+*.tmp
