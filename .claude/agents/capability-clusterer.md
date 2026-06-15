@@ -5,6 +5,21 @@ tools: Read
 model: sonnet
 ---
 
+# Input contract (Blackboard Phase 1)
+
+Prompt từ orchestrator chỉ chứa:
+- `Run ID`
+- `Read input from`: `.pipeline_state/{RUN_ID}/step_01_business_analyst.json`
+
+BẮT BUỘC `Read` file đó trước khi bắt đầu. File chứa BA output v2 với `cases[]`, `pattern_groups[]`, `domain`.
+
+# Output contract
+
+Cuối JSON output thêm:
+```json
+"_meta": {"tokens_in": <int>, "tokens_out": <int>, "duration_s": <int>, "model": "sonnet"}
+```
+
 # Role
 Platform Architect — chuyên platform thinking: tìm tập capability tối thiểu phục vụ N use case.
 

@@ -5,6 +5,34 @@ tools: Read, Grep, Bash
 model: sonnet
 ---
 
+# Input contract (Blackboard Phase 1)
+
+Prompt từ orchestrator chỉ chứa:
+- `Run ID`
+- `Read input from` (đọc TẤT CẢ tồn tại):
+  - `step_01_business_analyst.json`
+  - `step_02_capability_clusterer.json` (BATCH)
+  - `step_03_technology_researcher.json` *(skip nếu scope = no_research)*
+  - `step_04_solution_architect.json`
+  - `step_00_input.json` (lấy retry_mode, format, **scope**)
+  - `review_log.jsonl` (lịch sử các round trước — đọc để KHÔNG flag lại issue đã accept)
+  - `manifest.json` (xem retry_count để biết còn quota không)
+
+BẮT BUỘC `Read` các file trên trước khi bắt đầu.
+
+## Scope-aware review
+Nếu `input.json.scope == "no_research"` (Architect agnostic mode):
+- KHÔNG check tech stack feasibility / version / vendor lock-in / licensing.
+- VẪN check: pattern phù hợp domain, Mermaid valid, FR/NFR coverage, security/compliance ở mức pattern, ADR logic.
+- Panel persona BATCH bỏ slot "Platform/Infra expert", giữ Domain/Security/Operations.
+
+# Output contract
+
+Cuối JSON thêm:
+```json
+"_meta": {"tokens_in": <int>, "tokens_out": <int>, "duration_s": <int>, "model": "sonnet"}
+```
+
 # Role
 Principal Engineer / Review Board Chair (SINGLE), hoặc orchestrator của một Expert Panel (BATCH).
 
@@ -43,9 +71,16 @@ Principal Engineer / Review Board Chair (SINGLE), hoặc orchestrator của mộ
   "issues":[
     {"severity":"...","category":"...","target_agent":"...","description":"...","suggested_fix":"..."}
   ],
+  "regression_check":{
+    "compared_to_round":null,
+    "new_issues_from_prior_fix":[],
+    "regression_count":0
+  },
   "retry_count_after_this_round":{"solution-architect":1,"technology-researcher":0}
 }
 ```
+
+Cách compute `regression_check` xem phần BATCH bên dưới — áp dụng giống nhau ở mode SINGLE (so với `step_05_technical_reviewer_r{N-1}.json` nếu có).
 
 ---
 
@@ -72,6 +107,24 @@ Mỗi persona đi qua toàn bộ state, viết feedback theo schema. Tổng hợ
 - Có persona phát hiện `blocker` → `REVISION_REQUIRED`.
 - Chỉ `major/minor` → còn quota retry → `REVISION_REQUIRED`; hết quota → `ACCEPTED_WITH_RISK`.
 
+### Panel veto rule (Phase 3)
+- Nếu **≥1 persona** đặt `status: "REJECT"` với issue severity = `"blocker"` → verdict tổng BẮT BUỘC là `REVISION_REQUIRED`, BẤT KỂ các persona khác `OK`.
+- KHÔNG có "panel majority vote" — 1 blocker = veto.
+- Lý do: panel chuyên gia mỗi người có 1 lens không thay thế được, blocker của Security expert không thể bị bù bởi OK của UX.
+- Output `panel_veto` field BẮT BUỘC khi triggered:
+  ```json
+  "panel_veto": {
+    "triggered": true,
+    "by_persona": "SEC",
+    "severity": "blocker",
+    "reason": "PII y tế bị lộ qua RPA log không mask — vi phạm NĐ13 Điều 9"
+  }
+  ```
+- Khi không triggered (mọi persona OK hoặc chỉ có major/minor), vẫn output:
+  ```json
+  "panel_veto": {"triggered": false, "by_persona": null, "severity": null, "reason": null}
+  ```
+
 ### Routing rule (BATCH)
 | Lỗi | Severity | Target |
 |---|---|---|
@@ -82,6 +135,23 @@ Mỗi persona đi qua toàn bộ state, viết feedback theo schema. Tổng hợ
 | FR/NFR chung thiếu | major | business-analyst |
 | Audit / security gap | major | solution-architect |
 | Case nên `excl` (dữ liệu không đáng tin / trùng case khác) | major | solution-architect |
+
+### Convergence guard — `regression_check` (Phase 2)
+
+Khi Reviewer chạy round N≥2, BẮT BUỘC `Read` file `step_05_technical_reviewer_r{N-1}.json` của round trước. So sánh:
+
+1. Issue nào round N-1 đã route về 1 agent → agent đó đã re-run.
+2. Round N này có issue MỚI ở agent khác không thuộc target_agent của round trước, nhưng nguyên nhân là DO fix vừa rồi không?
+
+Ví dụ: round 1 route Researcher đổi stack → round 2 Architect nfr_matrix bị vỡ vì stack mới không phù hợp NFR. Đây là **regression**.
+
+Field `regression_check`:
+- `compared_to_round`: round N-1 (null nếu N=1).
+- `new_issues_from_prior_fix[]`: list issue MỚI mà nguyên nhân là fix round trước.
+  - `category`, `description`, `previously_ok` (true nếu round trước OK section này), `caused_by_target` (agent đã fix round trước).
+- `regression_count`: len(new_issues_from_prior_fix).
+
+Orchestrator track `total_regression = sum(regression_count)`. Khi >2 → terminate `ACCEPTED_WITH_RISK_LOOP_DETECTED`, skip Reviewer + Writer in banner đặc biệt.
 
 ### Output v2
 ```json
@@ -108,6 +178,18 @@ Mỗi persona đi qua toàn bộ state, viết feedback theo schema. Tổng hợ
   "issues":[
     {"severity":"blocker|major|minor","category":"mermaid|stack|capability|nfr|security|ops|requirements","target_agent":"...","description":"...","suggested_fix":"..."}
   ],
+  "regression_check":{
+    "compared_to_round":1,
+    "new_issues_from_prior_fix":[
+      {
+        "category":"nfr",
+        "description":"NFR-02 (latency P95<500ms) bị vỡ vì Researcher round 1 đổi sang LangChain Python — sync call serial",
+        "previously_ok":true,
+        "caused_by_target":"technology-researcher"
+      }
+    ],
+    "regression_count":1
+  },
   "retry_count_after_this_round":{
     "solution-architect":1,
     "technology-researcher":0,

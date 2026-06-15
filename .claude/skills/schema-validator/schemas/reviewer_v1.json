@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Reviewer output SINGLE",
+  "type": "object",
+  "required": ["mode", "verdict", "issues", "_meta"],
+  "properties": {
+    "mode": {"const": "single"},
+    "verdict": {"enum": ["APPROVED", "REVISION_REQUIRED", "ACCEPTED_WITH_RISK"]},
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["severity", "category", "target_agent", "description", "suggested_fix"],
+        "properties": {
+          "severity": {"enum": ["blocker", "major", "minor"]},
+          "category": {"type": "string"},
+          "target_agent": {"enum": ["business-analyst", "technology-researcher", "solution-architect"]},
+          "description": {"type": "string"},
+          "suggested_fix": {"type": "string", "minLength": 5}
+        }
+      }
+    },
+    "retry_count_after_this_round": {"type": "object"},
+    "_meta": {"$ref": "#/$defs/meta"}
+  },
+  "$defs": {
+    "meta": {
+      "type": "object",
+      "required": ["tokens_in", "tokens_out", "duration_s", "model"],
+      "properties": {
+        "tokens_in": {"type": ["integer", "null"]},
+        "tokens_out": {"type": ["integer", "null"]},
+        "duration_s": {"type": ["integer", "null"]},
+        "model": {"type": "string"}
+      }
+    }
+  }
+}

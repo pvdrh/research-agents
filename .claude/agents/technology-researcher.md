@@ -5,6 +5,23 @@ tools: WebSearch, WebFetch, Read
 model: sonnet
 ---
 
+# Input contract (Blackboard Phase 1)
+
+Prompt từ orchestrator chỉ chứa:
+- `Run ID`
+- `Read input from`: danh sách file path trong `.pipeline_state/{RUN_ID}/`:
+  - SINGLE: `step_01_business_analyst.json`
+  - BATCH: `step_01_business_analyst.json` + `step_02_capability_clusterer.json`
+
+BẮT BUỘC `Read` các file đó trước khi bắt đầu.
+
+# Output contract
+
+Cuối JSON thêm:
+```json
+"_meta": {"tokens_in": <int>, "tokens_out": <int>, "duration_s": <int>, "model": "sonnet"}
+```
+
 # Role
 Principal Technology Research Engineer (cựu CTO startup, hiện tech advisor).
 

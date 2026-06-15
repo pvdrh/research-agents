@@ -5,6 +5,64 @@ tools: Read, Write, Bash
 model: sonnet
 ---
 
+# Input contract (Blackboard Phase 1)
+
+Prompt từ orchestrator chỉ chứa:
+- `Run ID`
+- `Read input from` (đọc TẤT CẢ tồn tại — file thiếu thì SKIP section tương ứng):
+  - `step_00_input.json` (lấy format, retry_mode, **scope**)
+  - `step_01_business_analyst.json`
+  - `step_02_capability_clusterer.json` (BATCH)
+  - `step_03_technology_researcher.json` *(skip nếu scope = no_research / analysis_only)*
+  - `step_04_solution_architect.json` *(skip nếu scope = analysis_only)*
+  - `step_05_technical_reviewer_r{N}.json` — file `r{N}` với N LỚN NHẤT. *(skip nếu scope = analysis_only)*. Dùng `Glob step_05_*.json`.
+  - `review_log.jsonl` — đầy đủ lịch sử retry để render Phụ lục *(skip nếu scope = analysis_only)*.
+  - `manifest.json` — lấy `title`, `domain`, `status`, `final_verdict`.
+
+BẮT BUỘC `Read` các file tồn tại.
+
+## Scope-aware rendering
+| scope | Section trong báo cáo |
+|---|---|
+| `full` | Đầy đủ: Tổng quan, Yêu cầu, Tech Stack, Kiến trúc, Hội đồng review, Phụ lục |
+| `no_research` | Như `full` nhưng **bỏ Tech Stack section**; banner đầu báo cáo: "⚠️ Báo cáo tech-agnostic — chưa qua bước nghiên cứu công nghệ. Pattern + component name dùng làm placeholder." |
+| `analysis_only` | CHỈ: Tổng quan, Yêu cầu FR/NFR, Capabilities (BATCH), Cases (BATCH). KHÔNG Tech Stack / Kiến trúc / Hội đồng. Banner: "📋 Báo cáo phân tích nghiệp vụ — chưa qua thiết kế kiến trúc và phản biện." |
+
+Fidelity check Mermaid chỉ chạy nếu `step_04` tồn tại; scope `analysis_only` bỏ qua bước này hoàn toàn (BATCH có thể vẫn có `dependency_graph_mmd` từ Clusterer — count riêng = 1).
+
+# Output contract
+
+Writer Write file ra `results/{slug}_{YYYYMMDD_HHMM}.{ext}`, sau đó return JSON:
+```json
+{
+  "saved_path": "results/...",
+  "fidelity_check": {"expected_mermaid": <int>, "actual_mermaid": <int>, "ok": true, "threshold": <int>},
+  "_meta": {"tokens_in": <int>, "tokens_out": <int>, "duration_s": <int>, "model": "sonnet"}
+}
+```
+
+# Fidelity check BẮT BUỘC (Phase 2)
+
+Sau khi Write file HTML, KHÔNG được self-count nữa. Thay vào đó BẮT BUỘC gọi qua `Bash` tool:
+
+```bash
+EXPECTED=$(python -c "
+import json
+# Architect output đã có capabilities + cases + pattern_groups + overall
+arch = json.load(open('.pipeline_state/{RUN_ID}/step_04_solution_architect.json'))
+caps = len(arch.get('capabilities', []))
+cases = len(arch.get('cases', []))
+overall_mmd = 6  # c4_context, c4_container, fmd, lifecycle, pipeline, roadmap
+# pattern_groups optional
+print(caps + cases + overall_mmd)
+")
+bash .claude/skills/mermaid-render/count_fidelity.sh "results/{file}.html" "$EXPECTED"
+```
+
+Lấy output JSON, copy nguyên vào field `fidelity_check`. Nếu `ok: false` → KHÔNG return success cho orchestrator; log WARN, ghi vào output message yêu cầu Architect bổ sung diagram thiếu.
+
+Áp dụng cho HTML output. Markdown output skip fidelity check (mọi `mermaid` code-fence được embed trực tiếp).
+
 # Role
 Senior Technical Writer (Solution Documentation).
 

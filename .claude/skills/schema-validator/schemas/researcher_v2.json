@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Researcher output BATCH",
+  "type": "object",
+  "required": ["mode", "infra_overview", "capabilities_research", "_meta"],
+  "properties": {
+    "mode": {"const": "batch"},
+    "infra_overview": {"type": "string", "minLength": 20},
+    "capabilities_research": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "stackrows"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^C\\d+$"},
+          "name": {"type": "string"},
+          "stackrows": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["layer", "primary", "rationale"],
+              "properties": {
+                "layer": {"type": "string"},
+                "primary": {"type": "string"},
+                "alternatives": {"type": ["string", "null"]},
+                "rationale": {"type": "string"}
+              }
+            }
+          },
+          "api_examples": {"type": "array"},
+          "data_in": {"type": ["string", "null"]},
+          "data_out": {"type": ["string", "null"]},
+          "kpi": {"type": "array"},
+          "deps": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "pipeline_stages_example": {"type": "array"},
+    "sources": {"type": "array"},
+    "_meta": {"$ref": "#/$defs/meta"}
+  },
+  "$defs": {
+    "meta": {
+      "type": "object",
+      "required": ["tokens_in", "tokens_out", "duration_s", "model"],
+      "properties": {
+        "tokens_in": {"type": ["integer", "null"]},
+        "tokens_out": {"type": ["integer", "null"]},
+        "duration_s": {"type": ["integer", "null"]},
+        "model": {"type": "string"}
+      }
+    }
+  }
+}

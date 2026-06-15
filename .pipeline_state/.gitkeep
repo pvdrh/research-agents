@@ -1,0 +1,10 @@
+# Pipeline state directory
+
+Mỗi pipeline run = 1 thư mục `{run_id}/` chứa:
+- `manifest.json` — current_step, retry_count, status.
+- `step_NN_*.json` — output từng agent.
+- `review_log.jsonl` — append-only review history.
+
+Xem skill `.claude/skills/state-store/SKILL.md` để biết format và API.
+
+Resume một run dở qua `/resume-pipeline {run_id}`.

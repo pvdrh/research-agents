@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BA output SINGLE",
+  "type": "object",
+  "required": ["mode", "use_case_summary", "domain", "actors", "functional_requirements", "non_functional_requirements", "_meta"],
+  "properties": {
+    "mode": {"const": "single"},
+    "use_case_summary": {"type": "string", "minLength": 5},
+    "domain": {"type": "string", "minLength": 2},
+    "actors": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "functional_requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "description", "priority"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^FR-\\d+$"},
+          "description": {"type": "string", "minLength": 5},
+          "priority": {"enum": ["Must", "Should", "Could", "Won't"]}
+        }
+      }
+    },
+    "non_functional_requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "category", "target"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^NFR-\\d+$"},
+          "category": {"enum": ["performance", "security", "scalability", "availability", "compliance", "maintainability", "usability", "observability"]},
+          "target": {"type": "string"}
+        }
+      }
+    },
+    "assumptions": {"type": "array", "items": {"type": "string"}},
+    "open_questions": {"type": "array", "items": {"type": "string"}},
+    "_meta": {"$ref": "#/$defs/meta"}
+  },
+  "$defs": {
+    "meta": {
+      "type": "object",
+      "required": ["tokens_in", "tokens_out", "duration_s", "model"],
+      "properties": {
+        "tokens_in": {"type": ["integer", "null"]},
+        "tokens_out": {"type": ["integer", "null"]},
+        "duration_s": {"type": ["integer", "null"]},
+        "model": {"type": "string"}
+      }
+    }
+  }
+}

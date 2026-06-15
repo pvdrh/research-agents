@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Capability Clusterer output",
+  "type": "object",
+  "required": ["capabilities", "case_capability_map", "design_principles", "dependency_graph_mmd", "critical_path_caps", "_meta"],
+  "properties": {
+    "capabilities": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "category", "order", "desc", "stack_hint", "deps", "enables", "criticality", "risk_level", "case_count"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^C\\d+$"},
+          "name": {"type": "string", "minLength": 1, "maxLength": 60},
+          "category": {"type": "string"},
+          "order": {"type": "integer", "minimum": 1},
+          "desc": {"type": "string", "minLength": 5},
+          "stack_hint": {"type": "string"},
+          "deps": {"type": "array", "items": {"type": "string", "pattern": "^C\\d+$"}},
+          "enables": {"type": "array", "items": {"type": "string", "pattern": "^C\\d+$"}},
+          "criticality": {"type": "integer", "minimum": 1, "maximum": 5},
+          "risk_level": {"enum": ["low", "medium", "high"]},
+          "case_count": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "case_capability_map": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["case_id", "caps", "tech_summary"],
+        "properties": {
+          "case_id": {"type": "string"},
+          "caps": {"type": "array", "items": {"type": "string", "pattern": "^C\\d+$"}, "minItems": 1, "maxItems": 8},
+          "tech_summary": {"type": "string"},
+          "human_touch": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "design_principles": {"type": "array", "items": {"type": "string"}, "minItems": 3},
+    "dependency_graph_mmd": {"type": "string", "minLength": 20},
+    "critical_path_caps": {"type": "array", "items": {"type": "string"}, "minItems": 2},
+    "_meta": {"$ref": "#/$defs/meta"}
+  },
+  "$defs": {
+    "meta": {
+      "type": "object",
+      "required": ["tokens_in", "tokens_out", "duration_s", "model"],
+      "properties": {
+        "tokens_in": {"type": ["integer", "null"]},
+        "tokens_out": {"type": ["integer", "null"]},
+        "duration_s": {"type": ["integer", "null"]},
+        "model": {"type": "string"}
+      }
+    }
+  }
+}

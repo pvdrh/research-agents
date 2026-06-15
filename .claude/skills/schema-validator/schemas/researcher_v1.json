@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Researcher output SINGLE",
+  "type": "object",
+  "required": ["mode", "candidates", "recommended_index", "rationale", "_meta"],
+  "properties": {
+    "mode": {"const": "single"},
+    "candidates": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["name", "layers", "pros", "cons", "maturity_score"],
+        "properties": {
+          "name": {"type": "string"},
+          "layers": {"type": "object"},
+          "pros": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "cons": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "cost_estimate": {"type": ["string", "null"]},
+          "maturity_score": {"type": "integer", "minimum": 1, "maximum": 5},
+          "fit_score_vs_NFR": {"type": "object"}
+        }
+      }
+    },
+    "recommended_index": {"type": "integer", "minimum": 0},
+    "rationale": {"type": "string", "minLength": 10},
+    "sources": {"type": "array"},
+    "_meta": {"$ref": "#/$defs/meta"}
+  },
+  "$defs": {
+    "meta": {
+      "type": "object",
+      "required": ["tokens_in", "tokens_out", "duration_s", "model"],
+      "properties": {
+        "tokens_in": {"type": ["integer", "null"]},
+        "tokens_out": {"type": ["integer", "null"]},
+        "duration_s": {"type": ["integer", "null"]},
+        "model": {"type": "string"}
+      }
+    }
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Reviewer output BATCH (Expert Panel)",
+  "type": "object",
+  "required": ["mode", "verdict", "panel", "issues", "_meta"],
+  "properties": {
+    "mode": {"const": "batch"},
+    "verdict": {"enum": ["APPROVED", "REVISION_REQUIRED", "ACCEPTED_WITH_RISK"]},
+    "panel": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "required": ["code", "name", "focus", "status", "comment"],
+        "properties": {
+          "code": {"type": "string"},
+          "name": {"type": "string"},
+          "focus": {"type": "string"},
+          "status": {"enum": ["OK", "ADJ", "REJECT"]},
+          "comment": {"type": "string"}
+        }
+      }
+    },
+    "case_adjustments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["case_id", "by", "old_potential", "new_potential", "reason"],
+        "properties": {
+          "case_id": {"type": "string"},
+          "by": {"type": "string"},
+          "old_potential": {"type": "number", "minimum": 0, "maximum": 1},
+          "new_potential": {"type": "number", "minimum": 0, "maximum": 1},
+          "reason": {"type": "string"},
+          "excl": {"type": "boolean"}
+        }
+      }
+    },
+    "capability_verdicts": {"type": "array"},
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["severity", "category", "target_agent", "description", "suggested_fix"],
+        "properties": {
+          "severity": {"enum": ["blocker", "major", "minor"]},
+          "category": {"type": "string"},
+          "target_agent": {"enum": ["business-analyst", "capability-clusterer", "technology-researcher", "solution-architect"]},
+          "description": {"type": "string"},
+          "suggested_fix": {"type": "string", "minLength": 5}
+        }
+      }
+    },
+    "regression_check": {
+      "type": "object",
+      "properties": {
+        "compared_to_round": {"type": ["integer", "null"]},
+        "new_issues_from_prior_fix": {"type": "array"},
+        "regression_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "panel_veto": {
+      "type": "object",
+      "description": "Khi ≥1 persona có status=REJECT + severity=blocker, verdict tổng bắt buộc REVISION_REQUIRED, bất kể các persona khác OK. 1 veto = không có majority vote.",
+      "properties": {
+        "triggered": {"type": "boolean"},
+        "by_persona": {"type": ["string", "null"]},
+        "severity": {"enum": ["blocker", "major", null]},
+        "reason": {"type": ["string", "null"]}
+      }
+    },
+    "retry_count_after_this_round": {"type": "object"},
+    "_meta": {"$ref": "#/$defs/meta"}
+  },
+  "$defs": {
+    "meta": {
+      "type": "object",
+      "required": ["tokens_in", "tokens_out", "duration_s", "model"],
+      "properties": {
+        "tokens_in": {"type": ["integer", "null"]},
+        "tokens_out": {"type": ["integer", "null"]},
+        "duration_s": {"type": ["integer", "null"]},
+        "model": {"type": "string"}
+      }
+    }
+  }
+}

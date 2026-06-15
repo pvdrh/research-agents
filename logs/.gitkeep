@@ -1,0 +1,8 @@
+# Logs directory
+
+Mỗi pipeline run sinh:
+- `logs/runs.log` — master append-only (mọi run).
+- `logs/{run_id}/run.log` — detail per-run.
+- `logs/{run_id}/tokens.json` — cost summary sau khi pipeline kết thúc.
+
+Xem skill `.claude/skills/observability/SKILL.md` để biết format và API.

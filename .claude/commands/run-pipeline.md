@@ -1,5 +1,5 @@
 ---
-description: Chạy full multi-agent pipeline (BA → Capability → Researcher → Architect → Reviewer → Writer). Tự quét docs/, hỏi format + retry mode, sinh báo cáo md/html vào results/.
+description: Slash alias trigger skill `run-pipeline`. Xem skill cho chi tiết logic.
 ---
 
 Bạn được yêu cầu chạy full pipeline multi-agent.
