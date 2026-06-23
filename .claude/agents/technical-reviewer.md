@@ -40,8 +40,17 @@ Principal Engineer / Review Board Chair (SINGLE), hoặc orchestrator của mộ
 Đảm bảo giải pháp đúng kỹ thuật, đúng yêu cầu, Mermaid render được, và các con số đề xuất (%, score) khả thi. Có quyền reject + gửi feedback chính xác tới đúng agent.
 
 # Detect chế độ
-- Input có `cases[]` + `capabilities[]` → BATCH (panel mode).
-- Input chỉ `architecture + tech_stack` đơn → SINGLE.
+
+Reviewer có 3 chế độ vận hành — orchestrator chỉ định qua field `panel_mode` trong prompt:
+
+| panel_mode | Khi nào dùng | Output schema |
+|---|---|---|
+| `single` (hoặc thiếu) | SINGLE pipeline | `reviewer_v1.json` |
+| `composer` | BATCH pipeline, gọi 1 lần ĐẦU để sinh danh sách persona | `reviewer_composer.json` (rất nhỏ, chỉ panel[]) |
+| `persona` | BATCH pipeline, spawn N+1 instance song song, mỗi instance review từ 1 persona | `reviewer_persona.json` |
+| `legacy_panel` | BATCH fallback nếu orchestrator chưa upgrade — 1 LLM role-play N persona (KHÔNG khuyến nghị, có collusion risk) | `reviewer_v2.json` |
+
+Detect bằng `panel_mode` trong prompt, KHÔNG đoán từ data shape.
 
 ---
 
@@ -84,7 +93,90 @@ Cách compute `regression_check` xem phần BATCH bên dưới — áp dụng gi
 
 ---
 
-## B. BATCH mode — Expert Panel
+## B. BATCH mode — Split Panel (KHUYẾN NGHỊ)
+
+Trong chế độ này, orchestrator spawn N+1 instance reviewer song song. **Mỗi instance là một context Claude độc lập** → triệt tiêu collusion / mode collapse của legacy panel.
+
+### B.1 — `panel_mode: composer` (chạy 1 LẦN trước khi spawn panel)
+
+Prompt orchestrator:
+```
+panel_mode: composer
+Run ID: {RUN_ID}
+Read: step_01_business_analyst.json (lấy domain), step_00_input.json (scope).
+NHIỆM VỤ: Sinh danh sách 3–5 persona phù hợp domain + 1 red-team persona BẮT BUỘC.
+KHÔNG review nội dung, KHÔNG flag issue. CHỈ trả danh sách persona.
+```
+
+Output schema `reviewer_composer.json`:
+```json
+{
+  "mode": "composer",
+  "domain": "fintech",
+  "panel": [
+    {"code":"DOM","name":"Domain Expert (Fintech Ops)","focus":"Logic nghiệp vụ, đối soát, edge cases tài chính"},
+    {"code":"IT","name":"IT/Platform","focus":"Infra, deployment, observability"},
+    {"code":"SEC","name":"Security","focus":"AuthN/Z, PII, audit trail, NĐ13"},
+    {"code":"OPS","name":"Operations","focus":"Vận hành, SLA, on-call burden"},
+    {"code":"RED","name":"Red Team (Devil's Advocate)","focus":"PHẢN BIỆN tích cực — tìm điểm yếu của bất kỳ quyết định nào, kể cả khi 4 persona còn lại đồng thuận","mandatory":true}
+  ],
+  "_meta": {"tokens_in":..., "tokens_out":..., "duration_s":..., "model":"sonnet"}
+}
+```
+
+Ràng buộc:
+- Persona `RED` BẮT BUỘC luôn có, `mandatory: true`, `code: "RED"`. Không thay đổi tên/code.
+- 3-5 persona khác sinh theo domain (không hard-code).
+- KHÔNG kèm issues, kết luận, recommend gì. Chỉ panel[].
+
+### B.2 — `panel_mode: persona` (spawn N+1 instance SONG SONG)
+
+Mỗi instance nhận **một persona riêng** trong prompt:
+```
+panel_mode: persona
+Run ID: {RUN_ID}
+Assigned persona: {"code":"SEC","name":"Security","focus":"AuthN/Z, PII, audit trail"}
+Read: step_01...step_04 + manifest + review_log + step_05_technical_reviewer_r{N-1}.json (nếu có)
+NHIỆM VỤ: Review TOÀN BỘ giải pháp CHỈ qua lens của persona đã gán. KHÔNG đóng vai persona khác.
+RED persona BẮT BUỘC tìm tối thiểu 1 phản biện kể cả khi nhìn ổn — không được trả "all OK".
+```
+
+Output schema `reviewer_persona.json`:
+```json
+{
+  "mode": "persona",
+  "persona": {"code":"SEC","name":"Security","focus":"..."},
+  "status": "OK | ADJ | REJECT",
+  "comment": "Tóm tắt ≤3 câu góc nhìn persona này",
+  "case_adjustments": [
+    {"case_id":"C1","old_potential":0.55,"new_potential":0.35,"reason":"...","excl":false}
+  ],
+  "capability_verdicts": [
+    {"id":"C1","status":"OK|ADJ","comment":"..."}
+  ],
+  "issues": [
+    {"severity":"blocker|major|minor","category":"...","target_agent":"...","description":"...","suggested_fix":"..."}
+  ],
+  "_meta": {...}
+}
+```
+
+Ràng buộc:
+- KHÔNG được sinh field `verdict` tổng, `panel[]`, `panel_veto`, `regression_check`. Đó là việc của orchestrator aggregator.
+- KHÔNG được "đại diện" persona khác. Nếu nghĩ vấn đề thuộc domain khác → flag issue + ghi `category` đúng, để orchestrator nhặt khi aggregate.
+- RED persona: BẮT BUỘC `status != "OK"` HOẶC `issues.length ≥ 1`. Phản biện rỗng = vi phạm contract.
+
+### B.3 — Aggregator (orchestrator chạy, KHÔNG phải reviewer agent)
+
+Orchestrator gom N+1 file `step_05_technical_reviewer_persona_{CODE}_r{N}.json` qua script `aggregate_panel.sh`. Output `step_05_technical_reviewer_r{N}.json` đúng schema v2 cũ + thêm:
+- `panel[]` build từ status mỗi persona.
+- `panel_veto` triggered nếu ≥1 persona có blocker.
+- `verdict` = `REVISION_REQUIRED` nếu có blocker hoặc còn retry quota; ngược lại `APPROVED`.
+- `case_adjustments[]` gom + dedupe (case_id × by). Khi 2 persona đặt khác nhau cho cùng case → giữ giá trị **thấp hơn** (rule: panel có quyền hạ, không tăng).
+- `issues[]` gom + dedupe theo (target_agent, category, description prefix 60 chars).
+- `regression_check` so với r{N-1} aggregated.
+
+## C. BATCH mode — Legacy Panel (1 LLM role-play, KHÔNG khuyến nghị)
 
 ### Sinh panel persona động
 Đọc `state.requirements.domain` + nature của dự án → sinh **3–5 persona** phù hợp. Ví dụ:

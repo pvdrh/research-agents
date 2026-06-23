@@ -31,6 +31,21 @@ description: Orchestrator end-to-end. Blackboard pattern — mọi artifact agen
 
 ## Quy trình tiền-chạy (BẮT BUỘC trước Step 1)
 
+### Bước 0 — Pre-flight check (lifecycle init)
+
+CHẠY ĐẦU TIÊN, trước khi hỏi user bất cứ gì:
+
+```bash
+bash .claude/skills/run-pipeline/init.sh
+INIT_EXIT=$?
+```
+
+- Exit `0` → ready, đi tiếp.
+- Exit `1` → có WARN nhưng được phép chạy (hiện cho user, không hỏi).
+- Exit `2` → HARD FAIL. In stderr cho user, **KHÔNG hỏi gì thêm, KHÔNG tạo run_id, dừng**. User phải fix lỗi (thiếu Node/python, docs rỗng, agent/skill missing, ...) rồi gọi lại `/run-pipeline`.
+
+Stderr của init.sh có sẵn format ASCII đẹp — hiển thị nguyên.
+
 ### Bước 0a — Quét `docs/`
 - `Glob docs/**/*` lọc bỏ ẩn (`.DS_Store`, `~$*`, `.tmp`, `.gitkeep`).
 - Rỗng → hỏi user dán mô tả văn xuôi hoặc bỏ file vào docs.
@@ -147,6 +162,36 @@ Step 1: business-analyst → Step 2: clusterer → Step 4: architect (agnostic)
 ```
 Step 1: business-analyst → Step 2: capability-clusterer → Step 6: writer
 ```
+
+## Budget circuit breaker (Phase 4)
+
+Sau MỖI step (sau khi save + gate xong, trước khi spawn agent kế tiếp), gọi:
+
+```bash
+BUDGET_OUT=$(bash .claude/skills/run-pipeline/check_budget.sh "$RUN_ID")
+BUDGET_EXIT=$?
+case $BUDGET_EXIT in
+  0) ;;  # ok, continue
+  1) bash .claude/skills/observability/log_event.sh "$RUN_ID" BUDGET_WARN "$(echo $BUDGET_OUT | python -c 'import json,sys;d=json.load(sys.stdin);print(f"reason={d[\"reason\"]}")')";;
+  2) bash .claude/skills/observability/log_event.sh "$RUN_ID" BUDGET_EXCEEDED "reason=$(echo $BUDGET_OUT | python -c 'import json,sys;print(json.load(sys.stdin)[\"reason\"])')"
+     bash .claude/skills/state-store/update.sh "$RUN_ID" '.status="ACCEPTED_WITH_RISK" | .final_verdict="ACCEPTED_WITH_RISK_BUDGET_EXCEEDED"'
+     # Skip mọi step còn lại trừ Writer (in best-effort report với banner)
+     goto Step Writer ;;
+esac
+```
+
+Cấu hình qua env vars (default rộng tay):
+- `BUDGET_MAX_TOKENS=2000000` (~2M tokens cả vào+ra)
+- `BUDGET_MAX_WALL_S=1800` (30 phút wall-clock)
+- `BUDGET_WARN_PCT=80`
+
+User override:
+```bash
+BUDGET_MAX_TOKENS=500000 BUDGET_MAX_WALL_S=600 /run-pipeline
+```
+
+Khi `final_verdict == "ACCEPTED_WITH_RISK_BUDGET_EXCEEDED"`, Writer in banner:
+> ⚠️ **Pipeline cắt sớm do vượt budget** — báo cáo là best-effort với state tại thời điểm cắt. Các step chưa chạy: {danh sách}.
 
 ## Quy tắc orchestration
 
@@ -302,6 +347,39 @@ Sau khi step_04 merged (hoặc trực tiếp save với strategy khác), chạy 
 
 ### Step 5 — Reviewer (feedback loop) 🔁
 
+**SINGLE pipeline**: spawn 1 reviewer như cũ (`panel_mode: single`).
+
+**BATCH pipeline — Split Panel** (KHUYẾN NGHỊ, default từ Phase 4):
+
+1. **Composer pass** — spawn 1 reviewer với `panel_mode: composer` để sinh danh sách 3-5 persona + 1 red-team (`code:"RED"`). Save → `step_05_composer.json`. Gọi schema-validator với `reviewer_composer.json`. Cache panel danh sách trong manifest `.panel` để các round retry tái dùng (KHÔNG re-compose).
+
+2. **Persona spawn (song song)** — đọc panel[], spawn N+1 reviewer instance qua Workflow tool (parallel pattern):
+   ```javascript
+   const panel = composer.panel  // N+1 persona, đã có RED
+   const persona_outs = await parallel(panel.map((p) => () =>
+     agent("technical-reviewer", {
+       model: "sonnet",
+       prompt: `panel_mode: persona
+Run ID: ${RUN_ID}
+Round: ${ROUND}
+Assigned persona: ${JSON.stringify(p)}
+Read state files (step_01..step_04 + step_05_technical_reviewer_r${ROUND-1}.json nếu có).
+Review CHỈ qua lens persona này. Output reviewer_persona.json.`
+     })
+   ))
+   ```
+   Mỗi instance ghi vào `step_05_technical_reviewer_persona_{CODE}_r{ROUND}.json`.
+
+3. **Aggregate** — orchestrator gọi:
+   ```bash
+   bash .claude/skills/run-pipeline/aggregate_panel.sh "$RUN_ID" "$ROUND"
+   ```
+   Sinh `step_05_technical_reviewer_r{ROUND}.json` đúng schema reviewer_v2.json. Sau đó chạy schema-validator như step thường.
+
+4. **Routing & retry**: như cũ. Convergence guard (TOTAL_REGRESSION>2) áp trên file aggregated.
+
+**BATCH pipeline — Legacy panel** (chỉ khi env `PANEL_MODE=legacy`): spawn 1 reviewer `panel_mode: legacy_panel`, behavior như Phase 3. Giữ làm fallback nếu Workflow tool không khả dụng.
+
 Round 1: file `step_05_technical_reviewer_r1.json`. Round N: `_rN.json`.
 
 #### Convergence guard (Phase 2)
@@ -384,7 +462,7 @@ bash .claude/skills/state-store/update.sh "$RUN_ID" \
   ".saved_path=\"$SAVED_PATH\" | .status=\"COMPLETED\" | .final_verdict=\"$VERDICT\""
 ```
 
-## Kết thúc pipeline
+## Kết thúc pipeline (lifecycle finalize)
 
 ```bash
 TOTAL_DURATION=$(( $(date +%s) - PIPELINE_START ))
@@ -393,8 +471,11 @@ TOTAL_TOKENS=$(awk -F' \\| ' '/STEP_OK/ {for(i=4;i<=NF;i++){split($i,kv,"="); if
 bash .claude/skills/observability/log_event.sh "$RUN_ID" END \
   "verdict=$VERDICT" "total_tokens=$TOTAL_TOKENS" "total_duration_s=$TOTAL_DURATION"
 
-bash .claude/skills/observability/summarize.sh "$RUN_ID"
+# Lifecycle finalize: gen tokens.json, in summary table, optional archive
+bash .claude/skills/run-pipeline/finalize.sh "$RUN_ID"
 ```
+
+Đặt `FINALIZE_ARCHIVE=1` trước khi gọi finalize.sh nếu muốn gzip `.pipeline_state/{run_id}/` thành `.pipeline_state/_archive/{run_id}.tar.gz` (mặc định OFF — giữ state dạng raw để debug).
 
 ## Output cuối cho user
 ```

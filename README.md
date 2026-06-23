@@ -49,7 +49,7 @@ Tự detect: ≥1 file tabular trong `docs/` → BATCH; còn lại → SINGLE.
 
 ---
 
-## 3. Kiến trúc kỹ thuật (Phase 1 + 2 + 3)
+## 3. Kiến trúc kỹ thuật (Phase 1 + 2 + 3 + 4)
 
 ### Blackboard pattern
 Toàn bộ state của 1 lần chạy được lưu vào thư mục `.pipeline_state/{run_id}/`, KHÔNG giữ trong context main-loop. Mỗi agent đọc input qua **file path** (`Read` tool), không nhồi data vào prompt → token tiết kiệm 5-10× ở BATCH lớn, và pipeline **resume được sau crash**.
@@ -70,15 +70,26 @@ Toàn bộ state của 1 lần chạy được lưu vào thư mục `.pipeline_s
 
 Agent sau detect file thiếu → tự branch sang mode tương ứng (vd Architect không thấy `step_03` → chạy agnostic mode).
 
-### Hard gates (Phase 2)
+### Hard gates (Phase 2 + 4)
 Sau mỗi `state-store.save`, orchestrator chạy gate; fail → re-spawn agent với prompt fix **chỉ chứa lỗi**:
 
 | Gate | Khi nào | Skill | Hành vi khi fail |
 |---|---|---|---|
+| **Pre-flight** | Trước Step 1 | `run-pipeline/init.sh` | Check node/npx/python/.venv/docs/DESIGN/agents/skills/disk. Hard fail → abort trước khi tiêu token |
 | **Schema** | mọi agent JSON | `schema-validator` | check JSON Schema + DAG acyclic + ID stability + cross-agent ref. Sai → re-spawn (max 3) |
 | **Mermaid render** | Clusterer + Architect | `mermaid-render` | render thật qua `npx @mermaid-js/mermaid-cli`. Fail render → re-spawn (max 3) |
 | **Convergence** | sau mỗi round Reviewer | `run-pipeline` | track `total_regression`. >2 → terminate `ACCEPTED_WITH_RISK_LOOP_DETECTED` |
-| **Panel veto** | Reviewer BATCH | `technical-reviewer` | 1 blocker REJECT từ panel = auto `REVISION_REQUIRED` |
+| **Panel veto** | Reviewer BATCH | `aggregate_panel.sh` | 1 blocker từ bất kỳ persona → auto `REVISION_REQUIRED` |
+| **Budget circuit breaker** | sau mỗi step | `run-pipeline/check_budget.sh` | Vượt `BUDGET_MAX_TOKENS` / `BUDGET_MAX_WALL_S` → terminate `ACCEPTED_WITH_RISK_BUDGET_EXCEEDED`, đi thẳng Writer |
+
+### Split Panel Reviewer (Phase 4)
+BATCH mode Reviewer chạy theo **Split Panel** thay vì 1 LLM role-play N persona (collusion risk):
+
+1. **Composer pass** — spawn 1 reviewer `panel_mode: composer` sinh 3–5 persona theo domain + 1 **Red Team** (`code:"RED"`) BẮT BUỘC. Schema enforce `contains:{code:"RED"}` — không thể quên red-team.
+2. **Persona spawn (song song)** — N+1 reviewer instance độc lập qua Workflow `parallel`, mỗi instance review CHỈ qua lens persona đã gán, KHÔNG thấy output các persona khác → triệt tiêu mode collapse.
+3. **Aggregate** — `aggregate_panel.sh` gom N+1 file → reviewer_v2 schema. Logic: panel build, veto trigger nếu ≥1 blocker, `case_adjustments` giữ `new_potential` **thấp nhất** khi conflict (rule "panel chỉ được hạ"), issues dedupe.
+
+Legacy panel (1 LLM N voice) giữ làm fallback khi env `PANEL_MODE=legacy`.
 
 ### Scale controller (Phase 3)
 Sau BA, orchestrator gọi `scale-controller/decide_strategy.sh` set `manifest.strategy`:
@@ -154,6 +165,13 @@ claude
 ```
 
 ### Bước 3 — Verify dependencies
+Cách 1 — chạy pre-flight check tự động:
+```bash
+bash .claude/skills/run-pipeline/init.sh
+```
+Script in bảng ASCII với 10+ check (node/npx/python/.venv/jq/docs/DESIGN/agents/skills/disk). Exit 0 = ready; exit 2 = hard fail (fix lỗi trước khi chạy pipeline).
+
+Cách 2 — check thủ công:
 ```bash
 node --version            # ≥ 16  (bỏ qua nếu chỉ dùng analysis_only)
 npx --version             # đi kèm npm
@@ -299,7 +317,10 @@ research-agents/
 Bạn nhập use case → docs/
        │
        ▼
-[0] Quét docs/ + AskUserQuestion (format, retry_mode, SCOPE) + new_run → run_pending_*
+[0a] Pre-flight check (init.sh) — fail-fast nếu thiếu dep / docs rỗng
+       │
+       ▼
+[0b] Quét docs/ + AskUserQuestion (format, retry_mode, SCOPE) + new_run → run_pending_*
        │
        ▼  input-reader cho từng file → gộp /tmp/input.json → state-store.save
        │
@@ -338,7 +359,7 @@ Bạn nhập use case → docs/
          ▼
 ┌──────────────────────┐
 │ 5. Reviewer          │ → SINGLE: 1 reviewer
-│ technical-reviewer   │   BATCH: panel 3-5 persona động (bỏ slot Infra nếu no_research)
+│ technical-reviewer   │   BATCH (Phase 4): Split Panel — composer → N+1 persona độc lập SONG SONG → aggregate
 └────────┬─────────────┘   convergence guard: total_regression > 2 → terminate
          │
          ├─ REVISION_REQUIRED → re-spawn target agent (max 3/agent) → round mới
@@ -351,8 +372,13 @@ Bạn nhập use case → docs/
 └──────────────────────┘   → count_fidelity.sh verify mọi diagram embed
          │
          ▼
+[7] finalize.sh — gen tokens.json, in summary table (tokens/wall/gates/risks), optional gzip state
+         │
+         ▼
    logs/{run_id}/tokens.json + summary stdout
 ```
+
+> Sau MỖI step (giữa các box), orchestrator gọi `check_budget.sh`: tổng tokens hoặc wall-clock vượt trần (default 2M tokens / 30 phút) → terminate `ACCEPTED_WITH_RISK_BUDGET_EXCEEDED`, đi thẳng Writer. Override: `BUDGET_MAX_TOKENS=500000 BUDGET_MAX_WALL_S=600 /run-pipeline`.
 
 **Tổng thời gian** (scope = `full`): SINGLE ~3-5 phút · BATCH 5-20 phút.
 - `no_research`: −30-40% (bỏ Researcher + bớt issue Reviewer raise).
@@ -434,6 +460,8 @@ Agent có sẵn: `business-analyst`, `capability-clusterer` (BATCH only), `techn
 | `OCR_UNAVAILABLE` | Cài `tesseract` hoặc gửi ảnh trực tiếp (Claude vision) |
 | `ACCEPTED_WITH_RISK_LOOP_DETECTED` | Reviewer oscillation. Xem `review_log.jsonl` để biết lý do |
 | `ACCEPTED_WITH_RISK_GATE_FAIL` | Schema/Mermaid gate fail >3 lần. Xem `logs/{run_id}/run.log` |
+| `ACCEPTED_WITH_RISK_BUDGET_EXCEEDED` | Vượt `BUDGET_MAX_TOKENS` hoặc `BUDGET_MAX_WALL_S`. Tăng trần qua env var hoặc giảm scope. |
+| `init.sh` báo `==> ABORT` | Thiếu hard dep (node/python/agents/skills) hoặc docs/ rỗng. Sửa theo từng dòng `[FAIL]` rồi chạy lại |
 | HTML mở ra trắng | Mermaid CDN cần online. F12 xem console |
 | Báo cáo thiếu diagram | `count_fidelity.sh` log mismatch. Xem `logs/{run_id}/run.log` |
 | Manifest corrupt khi resume | Xoá `.pipeline_state/{run_id}/` rồi chạy `/run-pipeline` mới |
@@ -469,6 +497,9 @@ tail -f logs/runs.log
 | Rule check Mermaid | `.claude/skills/mermaid-validator/SKILL.md` |
 | Tuỳ biến khung HTML SPA | `.claude/skills/html-report-render/SKILL.md` |
 | Hỗ trợ format input mới | `.claude/skills/input-reader/SKILL.md` |
+| Pre-flight check + lifecycle | `.claude/skills/run-pipeline/init.sh`, `finalize.sh` |
+| Budget circuit breaker | `.claude/skills/run-pipeline/check_budget.sh` |
+| Split Panel Reviewer + aggregator | `.claude/skills/run-pipeline/aggregate_panel.sh` + section "B. BATCH mode — Split Panel" trong `.claude/agents/technical-reviewer.md` |
 | Agnostic mode chi tiết | `.claude/agents/solution-architect.md` (section "Agnostic mode") |
 | Scope-aware review | `.claude/agents/technical-reviewer.md` (section "Scope-aware review") |
 | Scope-aware rendering | `.claude/agents/technical-writer.md` (section "Scope-aware rendering") |
@@ -483,7 +514,9 @@ tail -f logs/runs.log
 - **Scope-as-feature** — user chọn độ sâu pipeline (`full` / `no_research` / `analysis_only`) thay vì chạy cứng nhắc end-to-end. Tiết kiệm thời gian + token cho use case không cần tech selection.
 - **Blackboard, not prompt-stuffing** — state qua file path, không nhồi vào prompt. Skip step = không tạo file → agent sau tự branch.
 - **Fail fast, hard gates** — schema + Mermaid render check ngay sau save. Sai → re-spawn với prompt fix cụ thể, không đẩy lỗi xuống Reviewer.
-- **Always terminate** — max 3 retry/agent, timeout 10 phút/agent, convergence guard, panel veto. Pipeline LUÔN dừng và sinh file.
+- **Always terminate** — max 3 retry/agent, timeout 10 phút/agent, convergence guard, panel veto, budget circuit breaker. Pipeline LUÔN dừng và sinh file.
+- **Independent review (Phase 4)** — BATCH Reviewer là N+1 instance song song độc lập (mỗi persona 1 context riêng) thay vì 1 LLM role-play, triệt tiêu collusion / mode collapse. Red Team luôn bắt buộc.
+- **Bounded resources (Phase 4)** — pre-flight check fail-fast trước khi tiêu token; budget breaker terminate sớm khi vượt trần token/wall-clock thay vì silent overshoot.
 - **Resume-able** — crash → `/resume-pipeline {run_id}` không mất artifact.
 - **Observable** — mỗi event log vào `logs/`, mỗi agent return `_meta.tokens/duration`.
 - **Notion design system** — HTML output dùng tokens từ `DESIGN.md`, không hard-code.

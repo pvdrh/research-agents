@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Reviewer — single persona output (BATCH split-panel mode)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mode", "persona", "status", "comment", "issues", "_meta"],
+  "properties": {
+    "mode":   { "const": "persona" },
+    "persona": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "name", "focus"],
+      "properties": {
+        "code":      { "type": "string", "minLength": 2, "maxLength": 8 },
+        "name":      { "type": "string", "minLength": 1 },
+        "focus":     { "type": "string" },
+        "mandatory": { "type": "boolean" }
+      }
+    },
+    "status":  { "enum": ["OK", "ADJ", "REJECT"] },
+    "comment": { "type": "string", "maxLength": 600 },
+    "case_adjustments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["case_id"],
+        "properties": {
+          "case_id":       { "type": "string" },
+          "old_potential": { "type": "number", "minimum": 0, "maximum": 1 },
+          "new_potential": { "type": "number", "minimum": 0, "maximum": 1 },
+          "reason":        { "type": "string" },
+          "excl":          { "type": "boolean" }
+        }
+      }
+    },
+    "capability_verdicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status"],
+        "properties": {
+          "id":      { "type": "string" },
+          "status":  { "enum": ["OK", "ADJ"] },
+          "comment": { "type": "string" }
+        }
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "category", "target_agent", "description"],
+        "properties": {
+          "severity":      { "enum": ["blocker", "major", "minor"] },
+          "category":      { "type": "string" },
+          "target_agent":  { "type": "string" },
+          "description":   { "type": "string" },
+          "suggested_fix": { "type": "string" }
+        }
+      }
+    },
+    "_meta": {
+      "type": "object",
+      "required": ["tokens_in", "tokens_out", "duration_s", "model"],
+      "properties": {
+        "tokens_in":  { "type": ["integer","null"] },
+        "tokens_out": { "type": ["integer","null"] },
+        "duration_s": { "type": ["integer","null"] },
+        "model":      { "type": "string" }
+      }
+    }
+  }
+}

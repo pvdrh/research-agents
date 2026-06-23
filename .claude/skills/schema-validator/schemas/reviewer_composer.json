@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Reviewer — panel composer output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mode", "domain", "panel", "_meta"],
+  "properties": {
+    "mode":   { "const": "composer" },
+    "domain": { "type": "string" },
+    "panel": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "name", "focus"],
+        "properties": {
+          "code":      { "type": "string", "pattern": "^[A-Z]{2,5}$" },
+          "name":      { "type": "string", "minLength": 1 },
+          "focus":     { "type": "string", "minLength": 1 },
+          "mandatory": { "type": "boolean" }
+        }
+      },
+      "contains": {
+        "type": "object",
+        "properties": { "code": { "const": "RED" } },
+        "required": ["code"]
+      }
+    },
+    "_meta": {
+      "type": "object",
+      "required": ["tokens_in", "tokens_out", "duration_s", "model"],
+      "properties": {
+        "tokens_in":  { "type": ["integer","null"] },
+        "tokens_out": { "type": ["integer","null"] },
+        "duration_s": { "type": ["integer","null"] },
+        "model":      { "type": "string" }
+      }
+    }
+  }
+}
